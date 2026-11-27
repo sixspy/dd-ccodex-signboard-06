@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import re
+import time
+from datetime import datetime
 from fastapi import HTTPException
 
 from models import (
@@ -112,6 +114,50 @@ def require_positive_int(value, label: str, lo: int = 1, hi: int = 86400) -> int
 def hm_to_min(hm: str) -> int:
     h, m = hm.split(":")
     return int(h) * 60 + int(m)
+
+
+_DT_FORMATS = (
+    "%Y-%m-%dT%H:%M",
+    "%Y-%m-%d %H:%M",
+    "%Y-%m-%dT%H:%M:%S",
+    "%Y-%m-%d %H:%M:%S",
+)
+
+
+def parse_expiry(value, label: str = "失效时刻", *, allow_past: bool = False) -> float | None:
+    """解析失效时刻：空值返回 None；接受 epoch 秒或本地 ISO 时刻。
+
+    非空且不晚于当前时刻（除非 allow_past）一律拒写，避免「永久空屏」。
+    """
+    if value in (None, ""):
+        return None
+    ts: float | None = None
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        ts = float(value)
+    elif isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            ts = float(text)
+        except ValueError:
+            for fmt in _DT_FORMATS:
+                try:
+                    ts = datetime.strptime(text, fmt).timestamp()
+                    break
+                except ValueError:
+                    continue
+    if ts is None:
+        raise HTTPException(400, f"{label}格式不合法")
+    if not allow_past and ts <= time.time():
+        raise HTTPException(400, f"{label}须晚于当前时刻")
+    return ts
+
+
+def format_ts(ts: float | None) -> str:
+    if ts is None:
+        return ""
+    return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")
 
 
 def window_covers(start_hm: str, end_hm: str, now_hm: str) -> bool:

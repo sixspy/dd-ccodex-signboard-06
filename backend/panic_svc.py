@@ -7,7 +7,7 @@ from fastapi import APIRouter, Header, HTTPException
 from audit_svc import write_audit, write_history
 from auth import current_user, require_writer
 from db import connect, rows_to_list
-from locks import acquire, release
+from locks import acquire_many, release
 from validators import require_positive_int, require_title
 
 router = APIRouter(prefix="/api/panic", tags=["panic"])
@@ -52,8 +52,9 @@ def panic_official(body: dict, authorization: str | None = Header(default=None))
     require_writer(user)
     screen_id = require_positive_int(body.get("screen_id"), "屏幕编号")
     reason = require_title(body.get("reason") or "紧急撤屏", "原因")
-    lock_key = f"publish:{screen_id}"
-    acquire(lock_key, user["username"])
+    # 撤屏会同步失效同屏覆盖，故须与覆盖写入争用同一把 override 锁。
+    locks = [f"publish:{screen_id}", f"override:{screen_id}"]
+    held = acquire_many(locks, user["username"])
     try:
         with connect() as conn:
             screen = conn.execute("SELECT * FROM screens WHERE id=?", (screen_id,)).fetchone()
@@ -79,7 +80,8 @@ def panic_official(body: dict, authorization: str | None = Header(default=None))
         write_audit(user["username"], "panic.official", {"id": eid, "screen_id": screen_id})
         return {"id": eid, "path": "official"}
     finally:
-        release(lock_key, user["username"])
+        for key in reversed(held):
+            release(key, user["username"])
 
 
 @router.post("/shadow")
@@ -113,7 +115,7 @@ def promote_panic(shadow_id: int, authorization: str | None = Header(default=Non
         screen_id = sh["screen_id"]
         reason = sh["reason"]
     lock_key = f"publish:{screen_id}"
-    acquire(lock_key, user["username"])
+    held = acquire_many([lock_key, f"override:{screen_id}"], user["username"])
     try:
         with connect() as conn:
             conn.execute("DELETE FROM publications WHERE screen_id=? AND official=1", (screen_id,))
@@ -131,4 +133,5 @@ def promote_panic(shadow_id: int, authorization: str | None = Header(default=Non
         write_history("panic", eid, "promote_shadow", reason, user["username"])
         return {"id": eid, "path": "shadow_promote"}
     finally:
-        release(lock_key, user["username"])
+        for key in reversed(held):
+            release(key, user["username"])

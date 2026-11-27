@@ -24,9 +24,10 @@ PRODUCT_META = {
 
 def connect() -> sqlite3.Connection:
     DATA.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=15)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute("PRAGMA busy_timeout=15000")
     return conn
 
 
@@ -146,6 +147,7 @@ CREATE TABLE IF NOT EXISTS overrides(
   note TEXT NOT NULL DEFAULT '',
   official INTEGER NOT NULL DEFAULT 1,
   active INTEGER NOT NULL DEFAULT 1,
+  expires_at REAL,
   created_at REAL NOT NULL,
   created_by TEXT NOT NULL
 );
@@ -157,8 +159,18 @@ CREATE TABLE IF NOT EXISTS override_shadows(
   asset_id INTEGER REFERENCES assets(id),
   note TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL,
+  expires_at REAL,
   created_at REAL NOT NULL,
   created_by TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS lock_contention(
+  id INTEGER PRIMARY KEY,
+  lock_key TEXT NOT NULL,
+  holder TEXT NOT NULL,
+  requester TEXT NOT NULL,
+  reason TEXT NOT NULL DEFAULT '',
+  note TEXT NOT NULL DEFAULT '',
+  created_at REAL NOT NULL
 );
 CREATE TABLE IF NOT EXISTS change_history(
   id INTEGER PRIMARY KEY,
@@ -295,9 +307,21 @@ def _seed(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _migrate(conn: sqlite3.Connection) -> None:
+    """为旧库补列（signboard-06 到期时刻与争用痕）。"""
+    def cols(table: str) -> set[str]:
+        return {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+
+    if "expires_at" not in cols("overrides"):
+        conn.execute("ALTER TABLE overrides ADD COLUMN expires_at REAL")
+    if "expires_at" not in cols("override_shadows"):
+        conn.execute("ALTER TABLE override_shadows ADD COLUMN expires_at REAL")
+
+
 def init_db() -> None:
     with connect() as conn:
         conn.executescript(SCHEMA)
+        _migrate(conn)
         _seed(conn)
 
 

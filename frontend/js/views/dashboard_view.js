@@ -19,6 +19,8 @@ window.SB_VIEWS["dashboard-view"] = {
       { k: "pubs", l: "正式发布", v: d.official_publications },
       { k: "shadows", l: "待升正影子", v: d.open_shadows },
       { k: "ov", l: "生效覆盖", v: d.active_overrides },
+      { k: "blank", l: "生效空屏", v: d.active_blank_overrides },
+      { k: "contention", l: "争用痕", v: d.contention_events },
     ];
   }
 };

@@ -1,9 +1,10 @@
-name: signboard
+name: signboard-06
+
 services:
   app:
     build: .
     ports:
-      - "11730:8000"
+      - "11916:8000"
     volumes:
       - ./data:/app/data
     healthcheck:

@@ -1,13 +1,15 @@
 """屏幕台账。"""
 from __future__ import annotations
 
+import time
+
 from fastapi import APIRouter, Header, HTTPException
 
 from audit_svc import write_audit, write_history
 from auth import current_user, require_writer
 from db import connect, rows_to_list
-from models import SCREEN_STATUS_LABEL, ZONE_TYPE_LABEL
-from validators import require_code, require_screen_status, require_title
+from models import OVERRIDE_EFFECT_LABEL, SCREEN_STATUS_LABEL, ZONE_TYPE_LABEL
+from validators import format_ts, require_code, require_screen_status, require_title
 
 router = APIRouter(prefix="/api/screens", tags=["screens"])
 
@@ -22,6 +24,27 @@ def _enrich(row: dict, zone: dict | None = None) -> dict:
     return row
 
 
+def _active_override_map(conn) -> dict[int, dict]:
+    """同事务跨表：屏幕台账联查当前生效、未到期的正式覆盖。"""
+    now = time.time()
+    rows = conn.execute(
+        "SELECT * FROM overrides WHERE official=1 AND active=1 "
+        "AND (expires_at IS NULL OR expires_at > ?) ORDER BY id DESC",
+        (now,),
+    ).fetchall()
+    out: dict[int, dict] = {}
+    for r in rows:
+        if r["screen_id"] in out:
+            continue
+        out[r["screen_id"]] = {
+            "effect": r["effect"],
+            "effect_label": OVERRIDE_EFFECT_LABEL.get(r["effect"], r["effect"]),
+            "expires_at": r["expires_at"],
+            "expires_label": format_ts(r["expires_at"]),
+        }
+    return out
+
+
 @router.get("")
 def list_screens(authorization: str | None = Header(default=None)):
     current_user(authorization)
@@ -33,11 +56,13 @@ def list_screens(authorization: str | None = Header(default=None)):
             ORDER BY s.id
             """
         ).fetchall()
+        omap = _active_override_map(conn)
     items = []
     for r in rows:
         d = dict(r)
         d["status_label"] = SCREEN_STATUS_LABEL.get(d["status"], d["status"])
         d["zone_type_label"] = ZONE_TYPE_LABEL.get(d["zone_type"], d["zone_type"])
+        d["active_override"] = omap.get(d["id"])
         items.append(d)
     return {"items": items}
 

@@ -1,6 +1,8 @@
 """总览。"""
 from __future__ import annotations
 
+import time
+
 from fastapi import APIRouter, Header
 
 from auth import current_user
@@ -12,6 +14,7 @@ router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 @router.get("")
 def dashboard(authorization: str | None = Header(default=None)):
     current_user(authorization)
+    now = time.time()
     with connect() as conn:
         screens = conn.execute("SELECT COUNT(*) c FROM screens").fetchone()["c"]
         online = conn.execute("SELECT COUNT(*) c FROM screens WHERE status='online'").fetchone()["c"]
@@ -24,7 +27,17 @@ def dashboard(authorization: str | None = Header(default=None)):
         ).fetchone()["c"]
         panics = conn.execute("SELECT COUNT(*) c FROM panic_events").fetchone()["c"]
         overrides = conn.execute(
-            "SELECT COUNT(*) c FROM overrides WHERE official=1 AND active=1"
+            "SELECT COUNT(*) c FROM overrides WHERE official=1 AND active=1 "
+            "AND (expires_at IS NULL OR expires_at > ?)",
+            (now,),
+        ).fetchone()["c"]
+        blank_overrides = conn.execute(
+            "SELECT COUNT(*) c FROM overrides WHERE official=1 AND active=1 AND effect='force_blank' "
+            "AND (expires_at IS NULL OR expires_at > ?)",
+            (now,),
+        ).fetchone()["c"]
+        open_contention = conn.execute(
+            "SELECT COUNT(*) c FROM lock_contention"
         ).fetchone()["c"]
     return {
         "product": PRODUCT_META["name"],
@@ -38,4 +51,6 @@ def dashboard(authorization: str | None = Header(default=None)):
         "open_shadows": shadows,
         "panic_events": panics,
         "active_overrides": overrides,
+        "active_blank_overrides": blank_overrides,
+        "contention_events": open_contention,
     }

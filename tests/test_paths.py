@@ -58,6 +58,13 @@ REQUIRED_FIXTURES = [
     "time_windows.json",
     "publications.json",
     "change_history.json",
+    "override_blank_ttl_empty.json",
+]
+
+REQUIRED_FEAT_TESTS = [
+    "feat_blank_ttl_write.py",
+    "feat_blank_ttl_eval.py",
+    "feat_blank_ttl_race.py",
 ]
 
 
@@ -69,6 +76,12 @@ def test_backend_modules_exist():
 def test_frontend_views_exist():
     for name in REQUIRED_VIEWS:
         assert (FRONTEND / "js" / "views" / name).exists(), name
+
+
+def test_feat_tests_exist():
+    tests_dir = ROOT / "tests"
+    for name in REQUIRED_FEAT_TESTS:
+        assert (tests_dir / name).exists(), name
 
 
 def test_fixtures_exist():

@@ -38,3 +38,15 @@ def recent(limit: int = 50, authorization: str | None = Header(default=None)):
             (max(1, min(limit, 200)),),
         ).fetchall()
     return {"items": rows_to_list(rows)}
+
+
+@router.get("/contention")
+def contention(limit: int = 100, authorization: str | None = Header(default=None)):
+    """争用痕：失败方仅此落痕，争用说明独立成行。"""
+    current_user(authorization)
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM lock_contention ORDER BY id DESC LIMIT ?",
+            (max(1, min(limit, 300)),),
+        ).fetchall()
+    return {"items": rows_to_list(rows)}

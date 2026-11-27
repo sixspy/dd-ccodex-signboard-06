@@ -6,7 +6,7 @@ from fastapi import APIRouter, Header, HTTPException
 
 from auth import current_user
 from db import connect, rows_to_list
-from validators import require_hm, require_positive_int, window_covers
+from validators import format_ts, require_hm, require_positive_int, window_covers
 
 router = APIRouter(prefix="/api/evaluate", tags=["evaluate"])
 
@@ -17,13 +17,21 @@ def evaluate_screen(body: dict, authorization: str | None = Header(default=None)
     screen_id = require_positive_int(body.get("screen_id"), "屏幕编号")
     now_hm = require_hm(body.get("now_hm") or datetime.now().strftime("%H:%M"), "求值时刻")
     weekday = str(body.get("weekday") or datetime.now().isoweekday())
+    now_ts = datetime.now().timestamp()
     with connect() as conn:
+        # 同事务联查覆盖与正式发布，保证优先序账实一致（读快照）。
+        conn.execute("BEGIN")
         screen = conn.execute("SELECT * FROM screens WHERE id=?", (screen_id,)).fetchone()
         if not screen:
             raise HTTPException(404, "屏幕不存在")
+        # 只认正式、激活且未到期的覆盖；未升正影子永不参与求值。
+        # force_blank 必须带有效失效时刻（历史遗留 NULL 空屏不得当永久空屏）。
         ov = conn.execute(
-            "SELECT * FROM overrides WHERE screen_id=? AND official=1 AND active=1 ORDER BY id DESC LIMIT 1",
-            (screen_id,),
+            "SELECT * FROM overrides WHERE screen_id=? AND official=1 AND active=1 "
+            "AND (expires_at IS NULL OR expires_at > ?) "
+            "AND (effect != 'force_blank' OR expires_at > ?) "
+            "ORDER BY id DESC LIMIT 1",
+            (screen_id, now_ts, now_ts),
         ).fetchone()
         if ov:
             result = {
@@ -31,6 +39,8 @@ def evaluate_screen(body: dict, authorization: str | None = Header(default=None)
                 "effect": ov["effect"],
                 "playlist_id": ov["playlist_id"],
                 "asset_id": ov["asset_id"],
+                "expires_at": ov["expires_at"],
+                "expires_label": format_ts(ov["expires_at"]),
                 "now_hm": now_hm,
             }
             if ov["effect"] == "force_blank":
